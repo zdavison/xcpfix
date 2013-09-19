@@ -1,0 +1,241 @@
+#!/usr/bin/env ruby
+
+require 'xcodeproj'
+require 'fileutils'
+require 'optparse'
+
+IGNORE_LIST = ['./Pods']
+
+## - - - Xcodeproj
+
+class Xcodeproj::Project
+
+  def recurse_node(node, parent, &block)
+    node.augment(parent)
+
+    # ignore list
+    IGNORE_LIST.each do |ignore|
+      return if node.file_path.start_with?(ignore)
+    end
+
+    if node.isa == 'PBXFileReference'
+      yield(node, parent)
+      return
+    end
+
+    node.children.each do |child|
+      recurse_node(child, node, &block)
+    end
+  end
+
+  def each_file(&block)
+    recurse_node(root_object.main_group, root_object, &block)
+  end
+
+end
+
+class Xcodeproj::Project::Object::PBXProject
+
+  def path
+    project_root
+  end
+
+end
+
+class Xcodeproj::Project::Object::AbstractObject
+
+  attribute :file_path,            String
+  attribute :group_path,           String
+
+  attribute :backup_absolute_path, String
+  attribute :backup_path,          String
+  attribute :backup_name,          String
+
+  def augment(parent)
+    if self.path && self.name             # if we have a name and a path, the path is
+      self.file_path = "./#{self.path}"   # the absolute path, not the relative one
+    else
+      self.file_path = "#{parent.file_path || '.'}/#{self.path}"
+      self.file_path.gsub! %r{/+}, '/'    # cut duplicate slashes
+    end
+
+    self.group_path = "#{parent.group_path || '.'}/#{self.name || self.path}"
+    self.group_path.gsub! %r{/+}, '/'     # cut duplicate slashes
+
+  end
+
+end
+
+# - - - Recursive Functions
+
+def recurse_revert_node(project)
+
+  project.each_file do |node, parent|
+    if node.backup_path
+      puts "#{node.path} => #{node.backup_absolute_path}"
+      FileUtils.mkdir_p(File.dirname(node.backup_absolute_path))
+      FileUtils.move(node.file_path, node.backup_absolute_path)
+      node.name = (node.backup_name || node.name)
+      node.path = (node.backup_path || node.path)
+    end
+  end
+
+end
+
+def recurse_correct_node(project)
+
+  project.each_file do |node, parent|
+
+    # clear backup information so we dont have stale paths for future reverts
+    node.backup_absolute_path = nil
+    node.backup_name = nil
+    node.backup_path = nil
+
+    # move file, correct name && path
+    if node.file_path != node.group_path && File.exists?(node.file_path) && !File.exists?(node.group_path)
+      puts "#{node.file_path} => #{node.group_path}"
+      FileUtils.mkdir_p(File.dirname(node.group_path))
+      FileUtils.move(node.file_path, node.group_path)
+
+      # set backup path/name
+      node.backup_absolute_path   = node.file_path
+      node.backup_name            = node.name
+      node.backup_path            = node.path
+
+      # change path/name
+      node.source_tree = 'SOURCE_ROOT'            # set files to be relative to project
+      node.name = File.basename(node.group_path)  # so theyre easier to work with
+      node.path = node.group_path
+
+      # clear out our augmented data so we dont save it
+      node.file_path = nil
+      node.group_path = nil
+    end
+  end
+
+end
+
+def recurse_print_node(project)
+
+  project.each_file do |node, parent|
+    if node.file_path != node.group_path && File.exists?(node.file_path) && !File.exists?(node.group_path)
+      puts node.file_path + ' => ' + node.group_path
+    end
+  end
+
+end
+
+# - - - Modes
+
+def revert(project)
+
+  puts 'Reverting files to old locations...'
+  recurse_revert_node(project)
+
+  pbxproj_path = "#{project.path.realpath.to_path}/project.pbxproj"
+
+  # check backup
+  if File.exists?(pbxproj_path + '.backup')
+    puts 'Reverting .pbxproj to backup...'
+    FileUtils.move("#{pbxproj_path}.backup", pbxproj_path, force: true)
+  end
+
+end
+
+def correct(project, force)
+
+  pbxproj_path = "#{project.path.realpath.to_path}/project.pbxproj"
+
+  # remove backup if 'force' enabled
+  if force
+    puts 'Forcing removal of .backup file...'
+    FileUtils.remove("#{pbxproj_path}.backup")
+  end
+
+  # check backup
+  if File.exists?(pbxproj_path + '.backup')
+    puts "#{pbxproj_path}.backup already exists."
+    puts 'If you meant to overwrite it, remove it manually.'
+    puts "Alternately, run with '-f'"
+    exit
+  end
+
+  # backup project
+  puts 'Backing up project...'
+  FileUtils.copy(pbxproj_path , "#{pbxproj_path}.backup")
+
+  # correct project
+  puts 'Correcting project...'
+  recurse_correct_node(project)
+  project.save
+
+  puts 'Project corrected!'
+
+end
+
+def print(project)
+
+  puts 'Changes to be made:'
+  recurse_print_node(project)
+  puts '-------------------'
+
+end
+
+# - - - Main
+
+options = {}
+options[:mode] = '-c'
+options[:force] = false
+options[:project_file] = ARGV.first
+
+opt_parser = OptionParser.new do |opts|
+
+  opts.banner = "Usage: xcpfix [options] PROJECT.xcodeproj"
+
+  opts.on('-p', '--print [PROJECT_FILE]',
+          'noop, only print changes') do |file|
+    options[:mode] = '-p'
+    options[:project_file] = file
+  end
+
+  opts.on('-r', '--revert [PROJECT_FILE]',
+          'revert project to backup') do |file|
+    options[:mode] = '-r'
+    options[:project_file] = file
+  end
+
+  opts.on('-c', '--correct [PROJECT_FILE]',
+          'correct project file structure') do |file|
+    options[:mode] = '-c'
+    options[:project_file] = file
+  end
+
+  opts.on('-f', '--force', 'forcibly overwrite backup') do
+    options[:force] = true
+  end
+
+  opts.on_tail('-h', '--help') do
+    puts opts
+    exit
+  end
+
+end
+
+opt_parser.parse!(ARGV)
+
+# detect no project file
+unless options[:project_file]
+  puts opt_parser
+  exit
+end
+
+project = Xcodeproj::Project.open(options[:project_file])
+
+case options[:mode]
+when '-c'
+  correct(project, options[:force])
+when '-r'
+  revert(project)
+when '-p'
+  print(project)
+end
