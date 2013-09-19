@@ -1,11 +1,11 @@
 xcpfix
 ======
 
-# Installation
+## Installation
 
 `gem install xcpfix`
 
-# About
+## About
 
 `xcpfix` will let you automatically restructure your Xcodeproj file structure to match the structure reflected in the Xcodeproj.
 
