@@ -1,6 +1,12 @@
 xcpfix
 ======
 
+## Warning
+
+This is pretty much alpha software. Run it on your projects at your own risk.
+
+`xcpfix` will at least attempt to backup your project, and will also backup your file locations, if it moves them, so you can try to revert your project, if it screws anything up.
+
 ## Installation
 
 `gem install xcpfix`
@@ -12,8 +18,6 @@ xcpfix
 Essentially, this will take your Groups, and turn them into directories, and shuffle your files around appropriately.
 
 `xcpfix` is smart enough to ignore your cocoapods `./Pods` directory, so don't worry about that.
-
-This is a tentative alpha, so be careful! `xcpfix` will at least attempt to backup your project, and will also backup your file locations, if it moves them, so you can try to revert your project, if it screws anything up.
 
 It also currently doesn't care about any project settings you may have that reference files, so be careful. This should be easy to fix from compiler errors though.
 
