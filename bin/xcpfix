@@ -10,7 +10,7 @@ IGNORE_LIST = ['./Pods']
 
 class Xcodeproj::Project
 
-  def recurse_node(node, parent, &block)
+  def recurse_node(node, parent, node_type, &block)
     node.augment(parent)
 
     # ignore list
@@ -18,18 +18,25 @@ class Xcodeproj::Project
       return if node.file_path.start_with?(ignore)
     end
 
-    if node.isa == 'PBXFileReference'
+    if !node_type || node.isa == node_type
       yield(node, parent)
+    end
+
+    if node.isa == 'PBXFileReference'
       return
     end
 
     node.children.each do |child|
-      recurse_node(child, node, &block)
+      recurse_node(child, node, node_type, &block)
     end
   end
 
   def each_file(&block)
-    recurse_node(root_object.main_group, root_object, &block)
+    recurse_node(root_object.main_group, root_object, 'PBXFileReference', &block)
+  end
+
+  def each(&block)
+    recurse_node(root_object.main_group,root_object, nil, &block)
   end
 
 end
@@ -125,6 +132,18 @@ def recurse_print_node(project)
 
 end
 
+def recurse_clean_node(project)
+
+  project.each do |node,parent|
+    node.backup_absolute_path = nil
+    node.backup_name = nil
+    node.backup_path = nil
+    node.file_path = nil
+    node.group_path = nil
+  end
+
+end
+
 # - - - Modes
 
 def revert(project)
@@ -181,6 +200,15 @@ def print(project)
 
 end
 
+def clean(project)
+
+  puts 'Cleaning project...'
+  recurse_clean_node(project)
+  puts 'Cleaned!'
+  project.save
+
+end
+  
 # - - - Main
 
 options = {}
@@ -207,6 +235,12 @@ opt_parser = OptionParser.new do |opts|
   opts.on('-c', '--correct [PROJECT_FILE]',
           'correct project file structure') do |file|
     options[:mode] = '-c'
+    options[:project_file] = file
+  end
+
+  opts.on('-l', '--clean [PROJECT_FILE]',
+          'clean alien data') do |file|
+    options[:mode] = '-l'
     options[:project_file] = file
   end
 
@@ -238,4 +272,6 @@ when '-r'
   revert(project)
 when '-p'
   print(project)
+when '-l'
+  clean(project)
 end
