@@ -6,6 +6,8 @@ require 'optparse'
 
 IGNORE_LIST = ['./Pods']
 
+$move_cmd = FileUtils.method(:move)
+
 ## - - - Xcodeproj
 
 class Xcodeproj::Project
@@ -81,7 +83,7 @@ def recurse_revert_node(project)
     if node.backup_path
       puts "#{node.path} => #{node.backup_absolute_path}"
       FileUtils.mkdir_p(File.dirname(node.backup_absolute_path))
-      FileUtils.move(node.file_path, node.backup_absolute_path)
+      $move_cmd.call(node.file_path, node.backup_absolute_path)
       node.name = (node.backup_name || node.name)
       node.path = (node.backup_path || node.path)
     end
@@ -102,7 +104,7 @@ def recurse_correct_node(project)
     if node.file_path != node.group_path && File.exists?(node.file_path) && !File.exists?(node.group_path)
       puts "#{node.file_path} => #{node.group_path}"
       FileUtils.mkdir_p(File.dirname(node.group_path))
-      FileUtils.move(node.file_path, node.group_path)
+      $move_cmd.call(node.file_path, node.group_path)
 
       # set backup path/name
       node.backup_absolute_path   = node.file_path
@@ -264,6 +266,13 @@ unless options[:project_file]
 end
 
 project = Xcodeproj::Project.open(options[:project_file])
+
+if system('git status &> /dev/null')
+	puts "Project is versioned - using 'git mv'"
+	$move_cmd = lambda { | source, dest |
+		system("git", "mv", source, dest)
+	} 
+end
 
 case options[:mode]
 when '-c'
